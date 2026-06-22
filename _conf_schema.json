@@ -1,0 +1,63 @@
+{
+    "uapi_token": {
+        "description": "接口密钥 (Token)",
+        "hint": "请前往 uapis.cn 获取您的 API Token",
+        "type": "string",
+        "default": ""
+    },
+    "uapi_cd": {
+        "description": "指令冷却时间 (秒)",
+        "hint": "两次指令触发之间的最小间隔时间（建议 5 秒）",
+        "type": "float",
+        "default": 5.0
+    },
+    "llm_tools_enabled": {
+        "description": "允许 LLM 自动调用工具",
+        "hint": "开启后 LLM 可根据对话内容自动调用查询工具；关闭后只能通过 /u 指令手动触发",
+        "type": "bool",
+        "default": false
+    },
+    "uapi_text_mode": {
+        "description": "文本优先模式",
+        "hint": "开启后，机器人将只发送文字结果，不发送图片",
+        "type": "bool",
+        "default": false
+    },
+    "random_img_categories": {
+        "description": "随机图片图库范围",
+        "hint": "点击并勾选你想要包含的分类",
+        "type": "list",
+        "options": ["acg","landscape","anime","pc_wallpaper","mobile_wallpaper","general_anime","ai_drawing","bq","furry"],
+        "default": ["acg","landscape","anime","pc_wallpaper","mobile_wallpaper","general_anime","ai_drawing","bq","furry"]
+    },
+    "schedule_enabled": {
+        "description": "启用定时推送",
+        "hint": "开启后将在指定时间自动推送配置好的任务内容",
+        "type": "bool",
+        "default": false
+    },
+    "schedule_time": {
+        "description": "定时推送时间",
+        "hint": "格式 HH:MM，例如 08:00。多个时间用 | 分隔，如 08:00|20:00",
+        "type": "string",
+        "default": "08:00"
+    },
+    "schedule_groups": {
+        "description": "接收推送的群号列表",
+        "hint": "每行输入一个群号",
+        "type": "list",
+        "default": []
+    },
+    "schedule_users": {
+        "description": "接收推送的 QQ 号列表",
+        "hint": "每行输入一个 QQ 号",
+        "type": "list",
+        "default": []
+    },
+    "schedule_tasks": {
+        "description": "推送任务列表（按顺序执行，结果合并到一张图）",
+        "hint": "每行一个任务。可选：news(新闻), bili(哔哩哔哩热榜), acfun(A站热榜), github(HelloGitHub), netease_music(网易云), qq_music(QQ音乐), weread(微信读书)",
+        "type": "list",
+        "default": ["news"]
+    }
+}
