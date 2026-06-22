@@ -16,7 +16,7 @@ from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star
 from astrbot.api import logger
 from astrbot.api.message_components import Image, Plain, Node, Nodes
-from .scheduler import TaskScheduler, get_all_task_defaults
+from .scheduler import TaskScheduler
 
 
 class UApiProPlugin(Star):
@@ -149,11 +149,12 @@ class UApiProPlugin(Star):
             yield r
 
     @filter.command("u 指定城市推送", desc="推送指定城市的天气")
-    async def cmd_city_weather(self, event: AstrMessageEvent, city: str = ""):
+    async def cmd_city_weather(self, event: AstrMessageEvent):
         """手动推送指定城市的天气"""
         event.should_call_llm(False)
         from .apis import weather
 
+        city = self._extract_arg(event, r"u\s+指定城市推送")
         if not city:
             yield event.plain_result("❓ 用法：/u 指定城市推送 广州")
             return
@@ -166,16 +167,18 @@ class UApiProPlugin(Star):
         # 单独推送这个城市的天气
         bot_uin = event.get_self_id() or 1000000
         content = []
-        if isinstance(data, str) and ("<html" in data.lower() or "<style" in data or "<div" in data):
+        if isinstance(data, str) and ("<html" in data.lower() or "<style" in data):
             image_b64 = await self._render_html_to_image(data)
             if image_b64:
                 content.append(Image(file=f"base64://{image_b64}"))
             else:
-                content.append(Plain(str(data)[:500]))
+                content.append(Plain(f"(渲染失败: 🌤️ {city}天气)"))
+        elif isinstance(data, str) and (data.startswith("http") or data.endswith((".jpg", ".png", ".jpeg"))):
+            content.append(Image(file=data))
         elif isinstance(data, str):
             content.append(Plain(str(data)[:500]))
         else:
-            content.append(Image(file=data))
+            content.append(Plain(str(data)[:500]))
 
         node = Node(uin=bot_uin, name=f"🌤️ {city}天气", content=content)
         from astrbot.api.event import MessageChain
@@ -582,7 +585,7 @@ class UApiProPlugin(Star):
         event.should_call_llm(False)
         from .scheduler import _fetch_single_task
 
-        tasks = self.plugin_config.get("schedule_tasks", get_all_task_defaults())
+        tasks = self.plugin_config.get("schedule_tasks", ["news"])
         token = self.plugin_config.get("uapi_token", "")
         bot_uin = event.get_self_id() or 1000000
         default_city = self.plugin_config.get("schedule_city", "")
@@ -608,11 +611,13 @@ class UApiProPlugin(Star):
                 if image_b64:
                     content.append(Image(file=f"base64://{image_b64}"))
                 else:
-                    content.append(Plain(str(data)[:500]))
-            elif isinstance(data, str) and len(data) > 50:
-                content.append(Plain(str(data)[:500]))
-            else:
+                    content.append(Plain(f"(渲染失败: {title})"))
+            elif isinstance(data, str) and (data.startswith("http") or data.endswith((".jpg", ".png", ".jpeg"))):
                 content.append(Image(file=data))
+            elif isinstance(data, str):
+                content.append(Plain(f"{title}\n{data[:500]}"))
+            else:
+                content.append(Plain(str(data)[:500]))
 
             nodes.append(Node(uin=bot_uin, name=title, content=content))
 
@@ -781,9 +786,4 @@ class UApiProPlugin(Star):
         except Exception:
             return "📊 结果解析失败。"
 
-    async def terminate(self):
-        if hasattr(self, "session") and not self.session.closed:
-            await self.session.close()
-        if hasattr(self, "bg_task"):
-            self.bg_task.cancel()
-        logger.info("[UApiPro] 插件卸载完成。")
+

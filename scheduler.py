@@ -247,7 +247,6 @@ class TaskScheduler:
         default_city = config.get("schedule_city", "")
         if default_city and hasattr(self.plugin, 'session'):
             self.plugin.session._default_city = default_city
-        token = config.get("uapi_token", "")
 
         results = []
 
