@@ -15,7 +15,7 @@ import aiohttp
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star
 from astrbot.api import logger
-from astrbot.api.message_components import Image, Plain, Node
+from astrbot.api.message_components import Image, Plain, Node, Nodes
 from .scheduler import TaskScheduler
 
 
@@ -564,7 +564,6 @@ class UApiProPlugin(Star):
                 logger.error(f"[UApiPro] 任务 {task_id} 异常: {e}")
                 continue
 
-            # 根据数据类型构建 Node 内容
             content = []
             if isinstance(data, str) and ("<html" in data.lower() or "<style" in data or "<div" in data):
                 image_b64 = await self._render_html_to_image(data)
@@ -585,8 +584,12 @@ class UApiProPlugin(Star):
             yield event.plain_result("❌ 所有任务均获取失败，请检查配置")
             return
 
-        # 所有 Node 一次性 yield，发出一条合并转发
-        yield event.chain_result(nodes)
+        # 使用 Nodes 包装，直接通过 send_message 发送合并转发
+        from astrbot.api.event import MessageChain
+        forward = Nodes(nodes=nodes)
+        umo = event.unified_msg_origin
+        await self.context.send_message(umo, MessageChain(chain=[forward]))
+        yield event.plain_result("📬 已推送全部热榜（合并转发）")
 
     async def _render_html_to_image(self, html_str: str) -> str | None:
         """渲染 HTML 为 base64 图片，失败返回 None"""
