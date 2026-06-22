@@ -30,6 +30,13 @@ _HOTBOARD_PLATFORMS = {
     "weread": "微信读书热榜",
 }
 
+# 所有可选任务（用于默认值和提示）
+ALL_TASKS = ["news", "bili", "acfun", "github", "netease_music", "qq_music", "weread", "weather"]
+
+def get_all_task_defaults() -> list:
+    """返回全部可用任务的默认列表"""
+    return list(ALL_TASKS)
+
 async def _fetch_single_task(task_id: str, token: str, session) -> tuple:
     """
     获取单个任务的数据。
@@ -40,7 +47,16 @@ async def _fetch_single_task(task_id: str, token: str, session) -> tuple:
         ok, data, err = await news.fetch(token, session=session)
         title = "📰 每日新闻"
         if ok:
-            # news 返回的是图片文件路径
+            return ok, data, title
+        return False, err, title
+
+    if task_id == "weather":
+        # 天气需要城市参数，定时任务用配置的默认城市
+        from .apis import weather
+        city = session._default_city if hasattr(session, '_default_city') else ""
+        ok, data, err = await weather.fetch(city, token, session=session)
+        title = "🌤️ 今日天气"
+        if ok:
             return ok, data, title
         return False, err, title
 
@@ -221,7 +237,16 @@ class TaskScheduler:
     async def _execute_tasks(self, config: dict):
         """执行所有配置好的任务，结果合并推送"""
         logger.info("[UApiPro] 开始执行定时推送任务")
+        # 检查是否开启了全部推送功能
+        if not config.get("push_all_enabled", True):
+            logger.info("[UApiPro] 全部推送功能已关闭(push_all_enabled=false)，跳过定时推送")
+            return
         tasks = config.get("schedule_tasks", ["news"])
+        token = config.get("uapi_token", "")
+        # 把默认城市存到 session 上供 _fetch_single_task 读取
+        default_city = config.get("schedule_city", "")
+        if default_city and hasattr(self.plugin, 'session'):
+            self.plugin.session._default_city = default_city
         token = config.get("uapi_token", "")
 
         results = []
