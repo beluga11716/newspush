@@ -552,8 +552,6 @@ class UApiProPlugin(Star):
         bot_uin = event.get_self_id() or 1000000
         nodes = []
 
-        yield event.plain_result("⏳ 正在获取所有热榜数据，请稍候...")
-
         for task_id in tasks:
             task_id = task_id.strip()
             if not task_id:
@@ -569,17 +567,14 @@ class UApiProPlugin(Star):
             # 根据数据类型构建 Node 内容
             content = []
             if isinstance(data, str) and ("<html" in data.lower() or "<style" in data or "<div" in data):
-                # HTML 内容 → 渲染为图片
                 image_b64 = await self._render_html_to_image(data)
                 if image_b64:
                     content.append(Image(file=f"base64://{image_b64}"))
                 else:
-                    content.append(Plain(f"{title}\n(渲染失败，请在 WebUI 查看)"))
+                    content.append(Plain(f"(渲染失败: {title})"))
             elif isinstance(data, str) and (data.startswith("http") or data.endswith((".jpg", ".png", ".jpeg"))):
-                # 图片路径（新闻类）
                 content.append(Image(file=data))
             elif isinstance(data, str):
-                # 纯文本
                 content.append(Plain(f"{title}\n{data[:500]}"))
             else:
                 content.append(Plain(str(data)[:500]))
@@ -590,6 +585,7 @@ class UApiProPlugin(Star):
             yield event.plain_result("❌ 所有任务均获取失败，请检查配置")
             return
 
+        # 所有 Node 一次性 yield，发出一条合并转发
         yield event.chain_result(nodes)
 
     async def _render_html_to_image(self, html_str: str) -> str | None:
