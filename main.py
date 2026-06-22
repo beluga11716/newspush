@@ -15,7 +15,7 @@ import aiohttp
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star
 from astrbot.api import logger
-from astrbot.api.message_components import Image, Plain
+from astrbot.api.message_components import Image, Plain, Node
 from .scheduler import TaskScheduler
 
 
@@ -543,14 +543,15 @@ class UApiProPlugin(Star):
 
     @filter.command("u 当天全部热榜", desc="推送所有已配置的任务")
     async def cmd_push_all(self, event: AstrMessageEvent):
-        """立即执行所有配置的定时任务，结果返回给当前用户"""
+        """立即执行所有配置的定时任务，合并转发为一条聊天记录"""
         event.should_call_llm(False)
-        from .scheduler import _fetch_single_task, _render_combined_html
+        from .scheduler import _fetch_single_task
 
         tasks = self.plugin_config.get("schedule_tasks", ["news"])
         token = self.plugin_config.get("uapi_token", "")
+        bot_uin = event.get_self_id() or 1000000
+        nodes = []
 
-        results = []
         yield event.plain_result("⏳ 正在获取所有热榜数据，请稍候...")
 
         for task_id in tasks:
@@ -559,30 +560,42 @@ class UApiProPlugin(Star):
                 continue
             try:
                 ok, data, title = await _fetch_single_task(task_id, token, self.session)
-                if ok:
-                    results.append((title, data))
+                if not ok:
+                    continue
             except Exception as e:
                 logger.error(f"[UApiPro] 任务 {task_id} 异常: {e}")
+                continue
 
-        if not results:
+            # 根据数据类型构建 Node 内容
+            content = []
+            if isinstance(data, str) and ("<html" in data.lower() or "<style" in data or "<div" in data):
+                # HTML 内容 → 渲染为图片
+                image_b64 = await self._render_html_to_image(data)
+                if image_b64:
+                    content.append(Image(file=f"base64://{image_b64}"))
+                else:
+                    content.append(Plain(f"{title}\n(渲染失败，请在 WebUI 查看)"))
+            elif isinstance(data, str) and (data.startswith("http") or data.endswith((".jpg", ".png", ".jpeg"))):
+                # 图片路径（新闻类）
+                content.append(Image(file=data))
+            elif isinstance(data, str):
+                # 纯文本
+                content.append(Plain(f"{title}\n{data[:500]}"))
+            else:
+                content.append(Plain(str(data)[:500]))
+
+            nodes.append(Node(uin=bot_uin, name=title, content=content))
+
+        if not nodes:
             yield event.plain_result("❌ 所有任务均获取失败，请检查配置")
             return
 
-        # 合并渲染
-        html_str = _render_combined_html(results)
+        yield event.chain_result(nodes)
 
-        # 文本模式降级
-        if self.plugin_config.get("uapi_text_mode", False):
-            text_parts = ["📬 今日推送\n" + "━" * 20]
-            for title, content in results:
-                text_parts.append(f"\n📌 {title}")
-                if isinstance(content, str) and len(content) < 2000:
-                    text_parts.append(content[:1000])
-            text_parts.append("\n" + "━" * 20 + "\nPowered by AstrBot · UApiPro")
-            yield event.plain_result("\n".join(text_parts))
-            return
-
-        # 渲染图片
+    async def _render_html_to_image(self, html_str: str) -> str | None:
+        """渲染 HTML 为 base64 图片，失败返回 None"""
+        if not hasattr(self, "html_render"):
+            return None
         import base64 as _base64
         render_strategies = [
             {"full_page": True, "type": "png", "scale": "device", "device_scale_factor_level": "ultra"},
@@ -590,7 +603,6 @@ class UApiProPlugin(Star):
             {"full_page": True, "type": "jpeg", "quality": 95, "scale": "device", "device_scale_factor_level": "high"},
             {"full_page": True, "type": "jpeg", "quality": 80, "scale": "device"},
         ]
-
         async with self.render_lock:
             for options in render_strategies:
                 try:
@@ -608,15 +620,10 @@ class UApiProPlugin(Star):
                     if not raw:
                         continue
                     if raw[:2] == b"\xff\xd8" or raw[:4] == b"\x89PNG":
-                        b64 = _base64.b64encode(raw).decode()
-                        yield event.chain_result(
-                            [Image(file=f"base64://{b64}"), Plain("\n📬 今日全部热榜")]
-                        )
-                        return
-                except Exception as e:
-                    logger.warning(f"[UApiPro] 渲染策略 {options} 失败: {e}")
-
-        yield event.plain_result("⚠️ 渲染失败，请稍后重试")
+                        return _base64.b64encode(raw).decode()
+                except Exception:
+                    pass
+        return None
 
     async def terminate(self):
         if hasattr(self, "session") and not self.session.closed:
