@@ -55,8 +55,8 @@
         "default": []
     },
     "schedule_tasks": {
-        "description": "推送任务列表（按顺序执行，结果合并到一张图）",
-        "hint": "每行一个任务。可选：news(新闻), bili(哔哩哔哩热榜), acfun(A站热榜), github(HelloGitHub), netease_music(网易云), qq_music(QQ音乐), weread(微信读书), weather(天气)",
+        "description": "推送任务列表（天气=图片，其他=文字，合并转发）",
+        "hint": "每行一个任务。可选：news(新闻), bili(哔哩哔哩热榜), acfun(A站热榜), github(HelloGitHub), netease_music(网易云), qq_music(QQ音乐), weread(微信读书), weather(天气·图片)",
         "type": "list",
         "options": ["news","bili","acfun","github","netease_music","qq_music","weread","weather"],
         "default": ["news"]

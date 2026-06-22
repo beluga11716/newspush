@@ -1,6 +1,6 @@
 """
 scheduler.py — 通用定时推送调度器
-支持多任务、多时间点，结果合并为一张图推送。
+支持多任务、多时间点。天气=图片渲染，其他=纯文字，合并转发输出。
 """
 
 import asyncio
@@ -10,7 +10,7 @@ import base64
 import os
 import contextlib
 from astrbot.api import logger
-from astrbot.api.message_components import Image, Plain
+from astrbot.api.message_components import Image, Plain, Node, Nodes
 
 # ======== 可调度任务注册表 ========
 # 每个条目: task_id -> (module_path, fetch_func_name, display_name)
@@ -33,14 +33,71 @@ _HOTBOARD_PLATFORMS = {
 # 所有可选任务（用于默认值和提示）
 ALL_TASKS = ["news", "bili", "acfun", "github", "netease_music", "qq_music", "weread", "weather"]
 
-def get_all_task_defaults() -> list:
-    """返回全部可用任务的默认列表"""
-    return list(ALL_TASKS)
+
+# ======== 热榜文字格式化 ========
+
+_HOTBOARD_EMOJI = {
+    "bilibili":      "📺",
+    "acfun":         "🍌",
+    "hellogithub":   "🐙",
+    "netease-music": "🎵",
+    "qq-music":      "🎶",
+    "weread":        "📖",
+}
+
+
+def format_hotboard_text(platform_id: str, display_name: str, items: list) -> str:
+    """将热榜结构化数据格式化为美观的文字输出"""
+    icon = _HOTBOARD_EMOJI.get(platform_id, "📊")
+    lines = [f"{icon} {display_name}", "━━━━━━━━━━━━━━"]
+
+    for item in items:
+        rank = item["index"]
+        title = item["title"]
+        hot = item.get("hot_value", "")
+        extra = item.get("extra", {})
+
+        # 副信息
+        sub = ""
+        if platform_id == "bilibili":
+            up = extra.get("up_name", "")
+            sub = f"  UP: {up}" if up else ""
+        elif platform_id == "hellogithub":
+            lang = extra.get("primary_lang", "")
+            repo = extra.get("full_name", "")
+            sub = f"  [{lang}] {repo}" if lang else f"  {repo}"
+        elif platform_id in ("netease-music", "qq-music"):
+            artist = extra.get("artist_names", "")
+            dur = extra.get("duration_text", "")
+            sub = f"  {artist}" + (f" · {dur}" if dur else "")
+        elif platform_id == "weread":
+            author = extra.get("author", "")
+            sub = f"  {author}" if author else ""
+
+        hot_str = f"  🔥{hot}" if hot else ""
+        lines.append(f"#{rank}  {title}{hot_str}")
+        if sub:
+            lines.append(f"     {sub}")
+        url = item.get("url", "")
+        if url:
+            lines.append(f"     🔗 {url}")
+
+    lines.append("━━━━━━━━━━━━━━")
+    lines.append("Powered by UApiPro")
+    return "\n".join(lines)
+
+
+# ======== 任务数据获取 ========
 
 async def _fetch_single_task(task_id: str, token: str, session) -> tuple:
     """
     获取单个任务的数据。
-    返回 (ok, data_or_html, title)
+    返回 (ok, data, title)
+
+    data 格式：
+      - weather:  HTML 字符串（用于渲染图片）
+      - news:     图片文件路径
+      - hotboard: dict {"type": "hotboard", "items": [...], "platform_id": "...", "html": "...", "display_name": "..."}
     """
     if task_id == "news":
         from .apis import news
@@ -51,9 +108,10 @@ async def _fetch_single_task(task_id: str, token: str, session) -> tuple:
         return False, err, title
 
     if task_id == "weather":
-        # 天气需要城市参数，定时任务用配置的默认城市
         from .apis import weather
-        city = session._default_city if hasattr(session, '_default_city') else ""
+        city = ""
+        if hasattr(session, '_default_city'):
+            city = session._default_city or ""
         ok, data, err = await weather.fetch(city, token, session=session)
         title = "🌤️ 今日天气"
         if ok:
@@ -65,11 +123,19 @@ async def _fetch_single_task(task_id: str, token: str, session) -> tuple:
         display = _HOTBOARD_PLATFORMS[task_id]
         ok, payload, err = await fetch(task_id, token, session=session)
         if ok:
-            return ok, payload["html"], display
+            return ok, {
+                "type": "hotboard",
+                "items": payload["items"],
+                "platform_id": payload["platform_id"],
+                "html": payload["html"],
+                "display_name": payload["display_name"],
+            }, display
         return False, err, display
 
     return False, f"未知任务: {task_id}", task_id
 
+
+# ======== HTML 合并渲染（保留，供未来可能的图片模式使用） ========
 
 def _render_combined_html(results: list) -> str:
     """
@@ -81,7 +147,6 @@ def _render_combined_html(results: list) -> str:
 
     for title, content in results:
         if content.startswith("http") or content.endswith((".jpg", ".png", ".jpeg")):
-            # 图片路径（如新闻），转为 embed img
             sections.append(f"""
             <div class="task-section">
                 <div class="section-header">{html.escape(title)}</div>
@@ -89,7 +154,6 @@ def _render_combined_html(results: list) -> str:
             </div>
             """)
         elif "<html" in content.lower() or "<style" in content or "<div" in content:
-            # HTML 内容（热榜），嵌入主体样式
             sections.append(f"""
             <div class="task-section">
                 <div class="section-header">{html.escape(title)}</div>
@@ -97,7 +161,6 @@ def _render_combined_html(results: list) -> str:
             </div>
             """)
         else:
-            # 纯文本
             sections.append(f"""
             <div class="task-section">
                 <div class="section-header">{html.escape(title)}</div>
@@ -183,10 +246,13 @@ def _render_combined_html(results: list) -> str:
 </html>"""
 
 
+# ======== 定时调度器 ========
+
 class TaskScheduler:
     """
     通用定时任务调度器。
     由主插件初始化，替代原来的 _news_scheduler。
+    输出策略：天气=图片渲染，其他=纯文字，合并转发。
     """
 
     def __init__(self, plugin):
@@ -237,18 +303,21 @@ class TaskScheduler:
     async def _execute_tasks(self, config: dict):
         """执行所有配置好的任务，结果合并推送"""
         logger.info("[UApiPro] 开始执行定时推送任务")
+
         # 检查是否开启了全部推送功能
         if not config.get("push_all_enabled", True):
             logger.info("[UApiPro] 全部推送功能已关闭(push_all_enabled=false)，跳过定时推送")
             return
+
         tasks = config.get("schedule_tasks", ["news"])
         token = config.get("uapi_token", "")
+
         # 把默认城市存到 session 上供 _fetch_single_task 读取
         default_city = config.get("schedule_city", "")
         if default_city and hasattr(self.plugin, 'session'):
             self.plugin.session._default_city = default_city
 
-        results = []
+        results = []  # [(task_id, title, data), ...]
 
         for task_id in tasks:
             task_id = task_id.strip()
@@ -258,7 +327,7 @@ class TaskScheduler:
             try:
                 ok, data, title = await _fetch_single_task(task_id, token, self.plugin.session)
                 if ok:
-                    results.append((title, data))
+                    results.append((task_id, title, data))
                     logger.info(f"[UApiPro] 任务 {task_id} 成功")
                 else:
                     logger.warning(f"[UApiPro] 任务 {task_id} 失败: {data}")
@@ -269,61 +338,107 @@ class TaskScheduler:
             logger.warning("[UApiPro] 所有任务均失败，跳过推送")
             return
 
-        # 合并成一张图
         await self._broadcast(results, config)
 
     async def _broadcast(self, results: list, config: dict):
-        """将合并结果推送到配置的群和用户"""
+        """
+        构建合并转发消息并推送到配置的群和用户。
+        results: [(task_id, title, data), ...]
+
+        输出规则：
+          - weather → 渲染 HTML 为图片 (Image Node)
+          - hotboard → 纯文字 (Plain Node)
+          - news → 直接使用图片 (Image Node)
+        """
         groups = config.get("schedule_groups", [])
         users = config.get("schedule_users", [])
         if not groups and not users:
             logger.info("[UApiPro] 未配置推送目标，跳过")
             return
 
-        # 获取平台标识
+        # 获取平台标识和 bot_uin
         plat = None
+        bot_uin = 1000000
         try:
             plat_insts = self.plugin.context.platform_manager.platform_insts
             if plat_insts:
-                plat = plat_insts[0].meta().id
+                meta = plat_insts[0].meta()
+                plat = meta.id
+                bot_uin = getattr(meta, 'self_id', 1000000) or 1000000
         except Exception:
             pass
         if not plat:
             logger.warning("[UApiPro] 未找到已注册平台，无法推送")
             return
 
-        # 渲染合并 HTML
-        html_str = _render_combined_html(results)
+        # ---- 构建 Nodes ----
+        nodes = []
+        for task_id, title, data in results:
+            content = []
 
-        # 如果是文本模式，直接推文字
-        if config.get("uapi_text_mode", False):
-            # 简单拼接文本
-            text_parts = ["📬 今日推送\n" + "━" * 20]
-            for title, content in results:
-                text_parts.append(f"\n📌 {title}")
-                if content and len(content) < 2000:
-                    text_parts.append(content[:1000])
-            text_parts.append("\n" + "━" * 20 + "\nPowered by AstrBot · UApiPro")
-            full_text = "\n".join(text_parts)
+            if task_id == "weather":
+                # 天气 → 渲染 HTML 为图片
+                if isinstance(data, str) and ("<html" in data.lower() or "<style" in data):
+                    image_b64 = await self._render_weather_image(data)
+                    if image_b64:
+                        content.append(Image(file=f"base64://{image_b64}"))
+                    else:
+                        logger.warning(f"[UApiPro] 天气图片渲染失败，降级文字")
+                        content.append(Plain(f"🌤️ {title}\n(天气图片渲染失败，请稍后重试)"))
+                else:
+                    content.append(Plain(f"🌤️ {title}\n{str(data)[:500]}"))
 
-            from astrbot.api.event import MessageChain
-            for gid in groups:
-                try:
-                    umo = str(gid) if ":" in str(gid) else f"{plat}:GroupMessage:{gid}"
-                    await self.plugin.context.send_message(umo, MessageChain().message(full_text))
-                    await asyncio.sleep(1.5)
-                except Exception as e:
-                    logger.error(f"[UApiPro] 推送失败 [{gid}]: {e}")
-            for uid in users:
-                try:
-                    umo = str(uid) if ":" in str(uid) else f"{plat}:FriendMessage:{uid}"
-                    await self.plugin.context.send_message(umo, MessageChain().message(full_text))
-                    await asyncio.sleep(1.5)
-                except Exception as e:
-                    logger.error(f"[UApiPro] 推送失败 [{uid}]: {e}")
+            elif isinstance(data, dict) and data.get("type") == "hotboard":
+                # 热榜 → 纯文字
+                text = format_hotboard_text(
+                    data["platform_id"], data["display_name"], data["items"]
+                )
+                content.append(Plain(text))
+
+            elif isinstance(data, str) and (data.startswith("http") or data.endswith((".jpg", ".png", ".jpeg"))):
+                # news 图片 → 直接使用
+                content.append(Image(file=data))
+                content.append(Plain(f"\n{title}"))
+
+            elif isinstance(data, str):
+                content.append(Plain(f"{title}\n{str(data)[:500]}"))
+
+            else:
+                content.append(Plain(str(data)[:500]))
+
+            if content:
+                nodes.append(Node(uin=bot_uin, name=title, content=content))
+
+        if not nodes:
+            logger.warning("[UApiPro] 没有可推送的内容")
             return
 
-        # 渲染为图片
+        # ---- 发送合并转发 ----
+        from astrbot.api.event import MessageChain
+        forward = Nodes(nodes=nodes)
+
+        for gid in groups:
+            try:
+                umo = str(gid) if ":" in str(gid) else f"{plat}:GroupMessage:{gid}"
+                await self.plugin.context.send_message(umo, MessageChain(chain=[forward]))
+                await asyncio.sleep(1.5)
+            except Exception as e:
+                logger.error(f"[UApiPro] 推送失败 [{gid}]: {e}")
+        for uid in users:
+            try:
+                umo = str(uid) if ":" in str(uid) else f"{plat}:FriendMessage:{uid}"
+                await self.plugin.context.send_message(umo, MessageChain(chain=[forward]))
+                await asyncio.sleep(1.5)
+            except Exception as e:
+                logger.error(f"[UApiPro] 推送失败 [{uid}]: {e}")
+
+        logger.info(f"[UApiPro] 定时推送完成，共 {len(nodes)} 个 Node")
+
+    async def _render_weather_image(self, html_str: str) -> str | None:
+        """渲染天气 HTML 为 base64 图片，失败返回 None"""
+        if not hasattr(self.plugin, "html_render"):
+            return None
+
         render_strategies = [
             {"full_page": True, "type": "png", "scale": "device", "device_scale_factor_level": "ultra"},
             {"full_page": True, "type": "jpeg", "quality": 100, "scale": "device", "device_scale_factor_level": "ultra"},
@@ -331,7 +446,6 @@ class TaskScheduler:
             {"full_page": True, "type": "jpeg", "quality": 80, "scale": "device"},
         ]
 
-        image_b64 = None
         async with self.plugin.render_lock:
             for options in render_strategies:
                 try:
@@ -349,34 +463,10 @@ class TaskScheduler:
                     if not raw:
                         continue
                     if raw[:2] == b"\xff\xd8" or raw[:4] == b"\x89PNG":
-                        image_b64 = base64.b64encode(raw).decode()
-                        break
-                except Exception as e:
-                    logger.warning(f"[UApiPro] 渲染策略 {options} 失败: {e}")
-
-        if not image_b64:
-            logger.warning("[UApiPro] 渲染失败，跳过图片推送")
-            return
-
-        from astrbot.api.event import MessageChain
-        for gid in groups:
-            try:
-                umo = str(gid) if ":" in str(gid) else f"{plat}:GroupMessage:{gid}"
-                await self.plugin.context.send_message(
-                    umo, MessageChain().file_image(f"base64://{image_b64}").message("\n📬 今日推送")
-                )
-                await asyncio.sleep(1.5)
-            except Exception as e:
-                logger.error(f"[UApiPro] 推送失败 [{gid}]: {e}")
-        for uid in users:
-            try:
-                umo = str(uid) if ":" in str(uid) else f"{plat}:FriendMessage:{uid}"
-                await self.plugin.context.send_message(
-                    umo, MessageChain().file_image(f"base64://{image_b64}").message("\n📬 今日推送")
-                )
-                await asyncio.sleep(1.5)
-            except Exception as e:
-                logger.error(f"[UApiPro] 推送失败 [{uid}]: {e}")
+                        return base64.b64encode(raw).decode()
+                except Exception:
+                    pass
+        return None
 
     def stop(self):
         if self._task:

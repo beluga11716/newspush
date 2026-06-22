@@ -555,6 +555,7 @@ class UApiProPlugin(Star):
             "━━━━━━━━━━━━━━\n"
             "✨ /u 一言\n"
             "🌤️ /u 天气 <城市>\n"
+            "📬 /u 指定城市推送 <城市>   推送指定城市天气\n"
             "🌐 /u ip <IP/域名>\n"
             "🎮 /u mc <服务器地址>\n"
             "👤 /u mc玩家 <正版ID>\n"
@@ -581,9 +582,15 @@ class UApiProPlugin(Star):
 
     @filter.command("u 当天全部热榜", desc="推送所有已配置的任务")
     async def cmd_push_all(self, event: AstrMessageEvent):
-        """立即执行所有配置的定时任务，合并转发为一条聊天记录"""
+        """立即执行所有配置的定时任务，合并转发为一条聊天记录
+
+        输出规则：
+          - weather → 渲染 HTML 为图片
+          - hotboard (bili/acfun/github/netease_music/qq_music/weread) → 纯文字
+          - news → 直接使用图片
+        """
         event.should_call_llm(False)
-        from .scheduler import _fetch_single_task
+        from .scheduler import _fetch_single_task, format_hotboard_text
 
         tasks = self.plugin_config.get("schedule_tasks", ["news"])
         token = self.plugin_config.get("uapi_token", "")
@@ -606,20 +613,39 @@ class UApiProPlugin(Star):
                 continue
 
             content = []
-            if isinstance(data, str) and ("<html" in data.lower() or "<style" in data or "<div" in data):
-                image_b64 = await self._render_html_to_image(data)
-                if image_b64:
-                    content.append(Image(file=f"base64://{image_b64}"))
+
+            if task_id == "weather":
+                # 天气 → 渲染 HTML 为图片
+                if isinstance(data, str) and ("<html" in data.lower() or "<style" in data):
+                    image_b64 = await self._render_html_to_image(data)
+                    if image_b64:
+                        content.append(Image(file=f"base64://{image_b64}"))
+                    else:
+                        logger.warning(f"[UApiPro] 天气图片渲染失败，降级文字")
+                        content.append(Plain(f"🌤️ {title}\n(天气图片渲染失败，请稍后重试)"))
                 else:
-                    content.append(Plain(f"(渲染失败: {title})"))
+                    content.append(Plain(f"🌤️ {title}\n{str(data)[:500]}"))
+
+            elif isinstance(data, dict) and data.get("type") == "hotboard":
+                # 热榜 → 纯文字
+                text = format_hotboard_text(
+                    data["platform_id"], data["display_name"], data["items"]
+                )
+                content.append(Plain(text))
+
             elif isinstance(data, str) and (data.startswith("http") or data.endswith((".jpg", ".png", ".jpeg"))):
+                # news 图片 → 直接使用
                 content.append(Image(file=data))
+                content.append(Plain(f"\n{title}"))
+
             elif isinstance(data, str):
-                content.append(Plain(f"{title}\n{data[:500]}"))
+                content.append(Plain(f"{title}\n{str(data)[:500]}"))
+
             else:
                 content.append(Plain(str(data)[:500]))
 
-            nodes.append(Node(uin=bot_uin, name=title, content=content))
+            if content:
+                nodes.append(Node(uin=bot_uin, name=title, content=content))
 
         if not nodes:
             yield event.plain_result("❌ 所有任务均获取失败，请检查配置")
