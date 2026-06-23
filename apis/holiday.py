@@ -1,6 +1,11 @@
 import aiohttp
 import re
 import datetime
+try:
+    from zoneinfo import ZoneInfo
+    BEIJING_TZ = ZoneInfo("Asia/Shanghai")
+except ImportError:
+    BEIJING_TZ = datetime.timezone(datetime.timedelta(hours=8))
 from astrbot.api import logger
 from ..card_renderer import render_card
 
@@ -30,7 +35,7 @@ async def fetch(arg_str: str, token: str, session: aiohttp.ClientSession = None)
 
     arg = arg_str.strip()
     if not arg:
-        params["date"] = datetime.datetime.now().strftime("%Y-%m-%d")
+        params["date"] = datetime.datetime.now(BEIJING_TZ).strftime("%Y-%m-%d")
     else:
         clean_arg = arg.replace("/", "-").replace(".", "-")
         day_match = re.match(r"^(\d{4})-(\d{1,2})-(\d{1,2})$", clean_arg)

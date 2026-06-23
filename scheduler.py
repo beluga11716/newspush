@@ -9,6 +9,11 @@ import html
 import base64
 import os
 import contextlib
+try:
+    from zoneinfo import ZoneInfo
+    BEIJING_TZ = ZoneInfo("Asia/Shanghai")
+except ImportError:
+    BEIJING_TZ = datetime.timezone(datetime.timedelta(hours=8))
 from astrbot.api import logger
 from astrbot.api.message_components import Image, Plain, Node, Nodes
 
@@ -155,7 +160,7 @@ def _render_combined_html(results: list) -> str:
     results: [(title, html_content_or_path), ...]
     """
     sections = []
-    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    now_str = datetime.datetime.now(BEIJING_TZ).strftime("%Y-%m-%d %H:%M")
 
     for title, content in results:
         if content.startswith("http") or content.endswith((".jpg", ".png", ".jpeg")):
@@ -282,7 +287,7 @@ class TaskScheduler:
                     continue
 
                 config = self.plugin.plugin_config
-                now = datetime.datetime.now()
+                now = datetime.datetime.now(BEIJING_TZ)
                 today = now.date().isoformat()
 
                 # 支持多个时间点，用 | 分隔
