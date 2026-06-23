@@ -30,6 +30,16 @@ _HOTBOARD_PLATFORMS = {
     "weread": "微信读书热榜",
 }
 
+# task_id → hotboard/fetcher.py PLATFORM_MAP 别名
+_HOTBOARD_ALIAS_MAP = {
+    "bili":           "bili",
+    "acfun":          "a站",
+    "github":         "github",
+    "netease_music":  "网易云",
+    "qq_music":       "qq音乐",
+    "weread":         "微信读书",
+}
+
 # 所有可选任务（用于默认值和提示）
 ALL_TASKS = ["news", "bili", "acfun", "github", "netease_music", "qq_music", "weread", "weather"]
 
@@ -68,13 +78,14 @@ def format_hotboard_text(platform_id: str, display_name: str, items: list) -> st
             sub = f"  [{lang}] {repo}" if lang else f"  {repo}"
         elif platform_id in ("netease-music", "qq-music"):
             artist = extra.get("artist_names", "")
-            dur = extra.get("duration_text", "")
-            sub = f"  {artist}" + (f" · {dur}" if dur else "")
+            sub = f"  {artist}" if artist else ""
         elif platform_id == "weread":
             author = extra.get("author", "")
             sub = f"  {author}" if author else ""
 
-        hot_str = f"  🔥{hot}" if hot else ""
+        # 音乐平台不显示热度值
+        is_music = platform_id in ("netease-music", "qq-music")
+        hot_str = f"  🔥{hot}" if (hot and not is_music) else ""
         lines.append(f"#{rank}  {title}{hot_str}")
         if sub:
             lines.append(f"     {sub}")
@@ -121,7 +132,8 @@ async def _fetch_single_task(task_id: str, token: str, session) -> tuple:
     if task_id in _HOTBOARD_PLATFORMS:
         from .hotboard.fetcher import fetch
         display = _HOTBOARD_PLATFORMS[task_id]
-        ok, payload, err = await fetch(task_id, token, session=session)
+        alias = _HOTBOARD_ALIAS_MAP.get(task_id, task_id)
+        ok, payload, err = await fetch(alias, token, session=session)
         if ok:
             return ok, {
                 "type": "hotboard",
