@@ -598,6 +598,7 @@ class UApiProPlugin(Star):
         default_city = self.plugin_config.get("schedule_city", "")
         if default_city:
             self.session._default_city = default_city
+        yield event.plain_result("🔍 正在搜寻热榜喵！")
         nodes = []
 
         for task_id in tasks:
@@ -656,7 +657,6 @@ class UApiProPlugin(Star):
         forward = Nodes(nodes=nodes)
         umo = event.unified_msg_origin
         await self.context.send_message(umo, MessageChain(chain=[forward]))
-        yield event.plain_result("📬 已推送全部热榜（合并转发）")
 
     async def _render_html_to_image(self, html_str: str) -> str | None:
         """渲染 HTML 为 base64 图片，失败返回 None"""
