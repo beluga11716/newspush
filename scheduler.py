@@ -449,6 +449,21 @@ class TaskScheduler:
             except Exception as e:
                 logger.error(f"[UApiPro] 推送失败 [{uid}]: {e}")
 
+        # 定时推送完毕提示
+        done_chain = MessageChain(chain=[Plain("今日推送完毕了喵！")])
+        for gid in groups:
+            try:
+                umo = str(gid) if ":" in str(gid) else f"{plat}:GroupMessage:{gid}"
+                await self.plugin.context.send_message(umo, done_chain)
+            except Exception as e:
+                logger.error(f"[UApiPro] 完毕提示失败 [{gid}]: {e}")
+        for uid in users:
+            try:
+                umo = str(uid) if ":" in str(uid) else f"{plat}:FriendMessage:{uid}"
+                await self.plugin.context.send_message(umo, done_chain)
+            except Exception as e:
+                logger.error(f"[UApiPro] 完毕提示失败 [{uid}]: {e}")
+
         logger.info(f"[UApiPro] 定时推送完成，共 {len(nodes)} 个 Node")
 
     async def _render_weather_image(self, html_str: str) -> str | None:

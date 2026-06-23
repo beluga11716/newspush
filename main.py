@@ -598,7 +598,8 @@ class UApiProPlugin(Star):
         default_city = self.plugin_config.get("schedule_city", "")
         if default_city:
             self.session._default_city = default_city
-        yield event.plain_result("🔍 正在搜寻热榜喵！")
+        if self.plugin_config.get("push_show_search_hint", True):
+            yield event.plain_result("🔍 正在搜寻热榜喵！")
         nodes = []
 
         for task_id in tasks:

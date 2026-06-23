@@ -72,5 +72,11 @@
         "hint": "填写城市名，如 广州、北京。留空则自动定位",
         "type": "string",
         "default": ""
+    },
+    "push_show_search_hint": {
+        "description": "显示「正在搜寻热榜喵！」提示",
+        "hint": "关闭后 /u 当天全部热榜 和定时推送都不会显示这句提示",
+        "type": "bool",
+        "default": true
     }
 }
